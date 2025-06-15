@@ -1,0 +1,267 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>ぷてぷてプテラ</title>
+  <style>
+    body { font-family: sans-serif; background: #f4f4f4; padding: 1em; text-align: center; }
+    #chatbox { background: white; max-width: 600px; height: 400px; margin: 0 auto 1em; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 1em; text-align: left; }
+    .msg { margin: 0.5em 0; }
+    .user { text-align: right; color: blue; }
+    .ai { text-align: left; color: black; }
+    #inputArea { display: flex; gap: 0.5em; justify-content: center; margin-bottom: 1em; }
+    input, button, select { font-size: 1em; padding: 0.5em; }
+  </style>
+</head>
+<body>
+
+<h2>ぷてぷてプテラ</h2>
+<div id="chatbox"></div>
+<div id="inputArea">
+  <input id="userInput" placeholder="はなしかけてほしいプテ" />
+  <select id="layerSelect">
+    <option value="80">80層プテ〜</option>
+    <option value="512">ほぼ最強の512層だプテ</option>
+    <option value="50" selected>推奨の50層プテ</option>
+    <option value="70">70層プテ〜</option>
+    <option value="1024">世界一かもしれないプテ。1024層だプテ〜</option>
+  </select>
+  <select id="StorageSelect">
+    <option value="PuteHis">PuteHis</option>
+    <option value="Ikada">Ikada</option>
+    <option value="Sakura">Sakura</option>
+  </select>
+  <button onclick="handleSend()">送信</button>
+  <button onclick="clearHistory()">履歴クリア</button>
+  <button onclick="loadBuiltinVocab();this.remove();" id="otb">初期履歴を読み込む</button>
+</div>
+
+<script>
+let history = [];
+let vocab = [];
+let vocabMap = {};
+let embeddings = [];
+const chatbox = document.getElementById("chatbox");
+const layerSelect = document.getElementById("layerSelect");
+const storageSelect = document.getElementById("StorageSelect");
+let embeddingSize = layerSelect.value * 8 + 85;
+
+const builtinVocab = [
+  "と", "は", "してるプテ", "してないプテ", "関係", "こんにちはだプテ", "ありがとだプテ", "そうだプテ", "わかったプテ",
+  "はい。だプテ〜", "いいえだプテー", "おはようプテ", "ごめんプテ", "お願いだプテ", "またねプテー", "ぷてぶてちいプテ",
+  "プテ〜", "プテプテ...", "私", "あなた", "彼", "彼女", "私たち", "人", "時間", "場所", "物", "こと", "日", "目",
+  "手", "子供", "大人", "名前", "本", "学校", "会社", "家", "車", "道", "町", "国", "仕事", "お金", "心",
+  "食べ物", "水", "友達", "する", "ある", "いる", "行く", "来る", "見る", "聞く", "話す", "思う", "知る",
+  "作る", "書く", "読む", "食べる", "飲む", "使う", "帰る", "立つ", "座る", "歩く", "泳ぐ", "教える", "学ぶ",
+  "働く", "買う", "大きい", "小さい", "長い", "短い", "新しい", "古い", "良い", "悪い", "高い", "安い", "早い",
+  "遅い", "熱い", "冷たい", "楽しい", "速く", "ゆっくり", "すぐ", "まだ", "もう", "よく", "たくさん", "が", "を",
+  "に", "で", "も", "何", "誰", "どこ", "いつ", "なぜ", "そして", "しかし", "また", "一", "二", "三", "四",
+  "五", "好き", "嫌い", "楽", "悲しい", "うれしい", "怒ってる", "びっくり", "笑顔", "泣いてる", "眠い", "食パン",
+  "ジュース", "ごはん", "りんご", "にんじん", "お菓子", "お弁当", "ケーキ", "魚", "肉", "空", "海", "山", "川",
+  "森", "草", "花", "星", "雲", "雨", "風", "雪", "天気", "寒い", "暑い", "静か", "にぎやか", "明るい", "暗い",
+  "遠い", "近い", "強い", "弱い", "光", "音", "声", "におい", "色", "ケーキプテ", "森プテ", "星プテ", "光プテ",
+  "雪プテ", "プテ"
+];
+
+function addToVocab(word) {
+  if (!(word in vocabMap)) {
+    vocabMap[word] = vocab.length;
+    vocab.push(word);
+    embeddings.push(Array.from({length: embeddingSize}, () => Math.random() * 2 - 1));
+  }
+}
+
+function loadBuiltinVocab() {
+  vocab = [];
+  vocabMap = {};
+  embeddings = [];
+  builtinVocab.forEach(addToVocab);
+}
+
+function tokenize(text) {
+  return text.match(/[　-〿぀-ゟ゠-ヿ一-龯A-Za-z0-9]+/g) || [];
+}
+
+function loadVocabFromHistory() {
+  history.forEach(h => tokenize(h.msg).forEach(addToVocab));
+}
+
+function loadHistoryFromStorage() {
+  const key = storageSelect.value;
+  history = JSON.parse(localStorage.getItem(key) || "[]");
+  chatbox.innerHTML = "";
+  loadBuiltinVocab();
+  history.forEach(h => appendMessage(h.msg, h.sender));
+  loadVocabFromHistory();
+}
+
+storageSelect.addEventListener('change', loadHistoryFromStorage);
+
+function encode(tokens) {
+  return tokens.map(t => vocabMap[t] ?? 0);
+}
+
+function dot(a, b) {
+  return a.reduce((sum, ai, i) => sum + ai * b[i], 0);
+}
+
+function addVec(a, b) {
+  return a.map((ai, i) => ai + b[i]);
+}
+
+function scaleVec(v, s) {
+  return v.map(vi => vi * s);
+}
+
+function zeroVec() {
+  return Array(embeddingSize).fill(0);
+}
+
+function softmax(arr) {
+  const exps = arr.map(Math.exp);
+  const sum = exps.reduce((a, b) => a + b, 0);
+  return exps.map(e => e / sum);
+}
+
+function attention(vectors) {
+  const Q = vectors, K = vectors, V = vectors;
+  const scores = Q.map(q => K.map(k => dot(q, k) / Math.sqrt(embeddingSize)));
+  const weights = scores.map(softmax);
+  return weights.map((row, i) => row.reduce((s, wj, j) => addVec(s, scaleVec(V[j], wj)), zeroVec()));
+}
+
+function generateNewWordFromInput(input) {
+  const tokens = tokenize(input);
+  if (tokens.length === 0) return "プテ";
+  const base = tokens[Math.floor(Math.random() * tokens.length)];
+  return base.slice(0, 2) + "プテ";
+}
+
+const posDict = {
+  verb: ["する", "行く", "来る", "見る", "聞く", "話す", "思う", "知る", "作る", "書く", "読む", "帰る", "働く", "使う", "食べる", "飲む", "泳ぐ", "立つ", "座る"],
+  adj: ["大きい", "小さい", "長い", "短い", "新しい", "古い", "良い", "悪い", "高い", "安い", "楽しい", "速く", "ゆっくり", "悲しい", "うれしい", "強い", "弱い", "寒い", "暑い", "静か", "にぎやか", "明るい", "暗い"],
+  noun: ["私", "あなた", "彼", "彼女", "子供", "大人", "名前", "学校", "会社", "町", "国", "仕事", "お金", "友達", "魚", "肉", "空", "山", "海", "星", "天気"]
+};
+
+function getPOS(word) {
+  for (const [pos, keywords] of Object.entries(posDict)) {
+    if (keywords.some(kw => word.includes(kw))) return pos;
+  }
+  return "other";
+}
+
+function getPastDependency(vecs, topK = 3) {
+  const len = vecs.length;
+  const deps = [];
+  for (let i = 0; i < len; i++) {
+    const scores = [];
+    for (let j = 0; j < i; j++) {
+      let score = dot(vecs[i], vecs[j]);
+      scores.push({ index: j, score });
+    }
+    scores.sort((a, b) => b.score - a.score);
+    deps.push(scores.slice(0, topK).map(x => x.index));
+  }
+  return deps;
+}
+
+function weightedRandomSample(probs) {
+  const r = Math.random();
+  let sum = 0;
+  for (let i = 0; i < probs.length; i++) {
+    sum += probs[i];
+    if (r <= sum) return i;
+  }
+  return probs.length - 1;
+}
+
+function transformerGenerate(inputText, layers) {
+  const tokens = tokenize(inputText);
+  tokens.forEach(addToVocab);
+  const ids = encode(tokens);
+  if (ids.length === 0) return "うーん、ちょっとわからないな。";
+  let vecs = ids.map(id => embeddings[id]);
+  for (let i = 0; i < layers; i++) vecs = attention(vecs);
+  const avg = vecs.reduce(addVec, zeroVec()).map(x => x / vecs.length);
+  const sims = embeddings.map(emb => dot(avg, emb));
+  const probs = softmax(sims);
+  let words = [];
+  let lastPOS = null;
+  for (let i = 0; i < 6; i++) {
+    if (Math.random() < 0.25) {
+      words.push(generateNewWordFromInput(inputText));
+      lastPOS = "noun";
+      continue;
+    }
+    let idx = weightedRandomSample(probs);
+    let cand = vocab[idx];
+    let pos = getPOS(cand);
+    if (lastPOS === "noun" && pos === "noun") {
+      for (let t = 0; t < 5; t++) {
+        idx = weightedRandomSample(probs);
+        cand = vocab[idx];
+        pos = getPOS(cand);
+        if (pos !== "noun") break;
+      }
+    }
+    words.push(cand);
+    lastPOS = pos;
+  }
+  words = cutOffOnRepeat(words.join(' ')).split(' ');
+  return words.join(' ');
+}
+
+function appendMessage(msg, sender) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + sender;
+  div.textContent = msg;
+  chatbox.appendChild(div);
+  chatbox.scrollTop = chatbox.scrollHeight;
+}
+
+function saveToHistory(sender, msg) {
+  const key = storageSelect.value;
+  history.push({sender, msg});
+  localStorage.setItem(key, JSON.stringify(history));
+}
+
+function clearHistory() {
+  const key = storageSelect.value;
+  history = [];
+  localStorage.removeItem(key);
+  chatbox.innerHTML = '';
+  loadBuiltinVocab();
+}
+
+function cutOffOnRepeat(text) {
+  const words = text.split(/\s+/);
+  const seen = new Set();
+  const result = [];
+  for (const word of words) {
+    if (seen.has(word)) break;
+    seen.add(word);
+    result.push(word);
+  }
+  return result.join(' ');
+}
+
+function handleSend() {
+  const input = document.getElementById('userInput').value.trim();
+  if (!input) return;
+  appendMessage(input, 'user');
+  saveToHistory('user', input);
+  document.getElementById('userInput').value = '';
+  const layers = parseInt(layerSelect.value);
+  setTimeout(() => {
+    const response = transformerGenerate(input, layers);
+    appendMessage(response, 'ai');
+    saveToHistory('ai', response);
+  }, 300);
+}
+
+loadHistoryFromStorage();
+</script>
+
+</body>
+</html>
