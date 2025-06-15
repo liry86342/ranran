@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>PutePute Ptera</title>
+  <style>
+    body { font-family: sans-serif; background: #f4f4f4; padding: 1em; text-align: center; }
+    #chatbox { background: white; max-width: 600px; height: 400px; margin: 0 auto 1em; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 1em; text-align: left; }
+    .msg { margin: 0.5em 0; }
+    .user { text-align: right; color: blue; }
+    .ai { text-align: left; color: black; }
+    #inputArea { display: flex; gap: 0.5em; justify-content: center; margin-bottom: 1em; }
+    input, button, select { font-size: 1em; padding: 0.5em; }
+  </style>
+</head>
+<body>
+
+<h2>PutePute Ptera</h2>
+<div id="chatbox"></div>
+<div id="inputArea">
+  <input id="userInput" placeholder="Talk to me, Ptera" />
+  <select id="layerSelect">
+    <option value="80">80 layers Ptera</option>
+    <option value="512">Almost strongest 512 layers Ptera</option>
+    <option value="50" selected>Recommended 50 layers Ptera</option>
+    <option value="70">70 layers Ptera</option>
+    <option value="1024">Might be world's best 1024 layers Ptera</option>
+  </select>
+  <select id="StorageSelect">
+    <option value="PuteHis">PuteHis</option>
+    <option value="Ikada">Ikada</option>
+    <option value="Sakura">Sakura</option>
+  </select>
+  <button onclick="handleSend()">Send</button>
+  <button onclick="clearHistory()">Clear History</button>
+  <button onclick="loadBuiltinVocab();this.remove();" id="otb">Load Initial History</button>
+</div>
+
+<script>
+let history = [];
+let vocab = [];
+let vocabMap = {};
+let embeddings = [];
+const chatbox = document.getElementById("chatbox");
+const layerSelect = document.getElementById("layerSelect");
+const storageSelect = document.getElementById("StorageSelect");
+let embeddingSize = layerSelect.value * 8 + 85;
+
+const builtinVocab = [
+  "and", "is", "doing Ptera", "not doing Ptera", "relation", "hello Ptera", "thanks Ptera", "that's right Ptera", "understood Ptera",
+  "yes. Ptera~", "no Ptera-", "good morning Ptera", "sorry Ptera", "please Ptera", "see you Ptera-", "cute Ptera",
+  "Ptera~", "PteraPtera...", "I", "you", "he", "she", "we", "people", "time", "place", "thing", "event", "day", "eye",
+  "hand", "child", "adult", "name", "book", "school", "company", "house", "car", "road", "town", "country", "work", "money", "heart",
+  "food", "water", "friend", "do", "exist", "be", "go", "come", "see", "hear", "talk", "think", "know",
+  "make", "write", "read", "eat", "drink", "use", "return", "stand", "sit", "walk", "swim", "teach", "learn",
+  "work", "buy", "big", "small", "long", "short", "new", "old", "good", "bad", "expensive", "cheap", "fast",
+  "slow", "hot", "cold", "fun", "quickly", "slowly", "soon", "still", "already", "well", "many", "that", "this",
+  "in", "at", "also", "what", "who", "where", "when", "why", "and then", "but", "again", "one", "two", "three", "four",
+  "five", "like", "dislike", "easy", "sad", "happy", "angry", "surprised", "smile", "crying", "sleepy", "bread",
+  "juice", "rice", "apple", "carrot", "snack", "lunchbox", "cake", "fish", "meat", "sky", "sea", "mountain", "river",
+  "forest", "grass", "flower", "star", "cloud", "rain", "wind", "snow", "weather", "cold", "hot", "quiet", "lively", "bright", "dark",
+  "far", "near", "strong", "weak", "light", "sound", "voice", "smell", "color", "cake Ptera", "forest Ptera", "star Ptera", "light Ptera",
+  "snow Ptera", "Ptera"
+];
+
+function addToVocab(word) {
+  if (!(word in vocabMap)) {
+    vocabMap[word] = vocab.length;
+    vocab.push(word);
+    embeddings.push(Array.from({length: embeddingSize}, () => Math.random() * 2 - 1));
+  }
+}
+
+function loadBuiltinVocab() {
+  vocab = [];
+  vocabMap = {};
+  embeddings = [];
+  builtinVocab.forEach(addToVocab);
+}
+
+function tokenize(text) {
+  return text.match(/[ \u3000-\u303F\u3040-\u309F\u30A0-\u30FF一-龯A-Za-z0-9]+/g) || [];
+}
+
+function loadVocabFromHistory() {
+  history.forEach(h => tokenize(h.msg).forEach(addToVocab));
+}
+
+function loadHistoryFromStorage() {
+  const key = storageSelect.value;
+  history = JSON.parse(localStorage.getItem(key) || "[]");
+  chatbox.innerHTML = "";
+  loadBuiltinVocab();
+  history.forEach(h => appendMessage(h.msg, h.sender));
+  loadVocabFromHistory();
+}
+
+storageSelect.addEventListener('change', loadHistoryFromStorage);
+
+function encode(tokens) {
+  return tokens.map(t => vocabMap[t] ?? 0);
+}
+
+function dot(a, b) {
+  return a.reduce((sum, ai, i) => sum + ai * b[i], 0);
+}
+
+function addVec(a, b) {
+  return a.map((ai, i) => ai + b[i]);
+}
+
+function scaleVec(v, s) {
+  return v.map(vi => vi * s);
+}
+
+function zeroVec() {
+  return Array(embeddingSize).fill(0);
+}
+
+function softmax(arr) {
+  const exps = arr.map(Math.exp);
+  const sum = exps.reduce((a, b) => a + b, 0);
+  return exps.map(e => e / sum);
+}
+
+function attention(vectors) {
+  const Q = vectors, K = vectors, V = vectors;
+  const scores = Q.map(q => K.map(k => dot(q, k) / Math.sqrt(embeddingSize)));
+  const weights = scores.map(softmax);
+  return weights.map((row, i) => row.reduce((s, wj, j) => addVec(s, scaleVec(V[j], wj)), zeroVec()));
+}
+
+function generateNewWordFromInput(input) {
+  const tokens = tokenize(input);
+  if (tokens.length === 0) return "Ptera";
+  const base = tokens[Math.floor(Math.random() * tokens.length)];
+  return base.slice(0, 2) + "Ptera";
+}
+
+const posDict = {
+  verb: ["do", "go", "come", "see", "hear", "talk", "think", "know", "make", "write", "read", "return", "work", "use", "eat", "drink", "swim", "stand", "sit"],
+  adj: ["big", "small", "long", "short", "new", "old", "good", "bad", "expensive", "cheap", "fun", "quickly", "slowly", "sad", "happy", "strong", "weak", "cold", "hot", "quiet", "lively", "bright", "dark"],
+  noun: ["I", "you", "he", "she", "child", "adult", "name", "school", "company", "town", "country", "work", "money", "friend", "fish", "meat", "sky", "mountain", "sea", "star", "weather"]
+};
+
+function getPOS(word) {
+  for (const [pos, keywords] of Object.entries(posDict)) {
+    if (keywords.some(kw => word.includes(kw))) return pos;
+  }
+  return "other";
+}
+
+function getPastDependency(vecs, topK = 3) {
+  const len = vecs.length;
+  const deps = [];
+  for (let i = 0; i < len; i++) {
+    const scores = [];
+    for (let j = 0; j < i; j++) {
+      let score = dot(vecs[i], vecs[j]);
+      scores.push({ index: j, score });
+    }
+    scores.sort((a, b) => b.score - a.score);
+    deps.push(scores.slice(0, topK).map(x => x.index));
+  }
+  return deps;
+}
+
+function weightedRandomSample(probs) {
+  const r = Math.random();
+  let sum = 0;
+  for (let i = 0; i < probs.length; i++) {
+    sum += probs[i];
+    if (r <= sum) return i;
+  }
+  return probs.length - 1;
+}
+
+function transformerGenerate(inputText, layers) {
+  const tokens = tokenize(inputText);
+  tokens.forEach(addToVocab);
+  const ids = encode(tokens);
+  if (ids.length === 0) return "Hmm, I don't quite understand.";
+  let vecs = ids.map(id => embeddings[id]);
+  for (let i = 0; i < layers; i++) vecs = attention(vecs);
+  const avg = vecs.reduce(addVec, zeroVec()).map(x => x / vecs.length);
+  const sims = embeddings.map(emb => dot(avg, emb));
+  const probs = softmax(sims);
+  let words = [];
+  let lastPOS = null;
+  for (let i = 0; i < 6; i++) {
+    if (Math.random() < 0.25) {
+      words.push(generateNewWordFromInput(inputText));
+      lastPOS = "noun";
+      continue;
+    }
+    let idx = weightedRandomSample(probs);
+    let cand = vocab[idx];
+    let pos = getPOS(cand);
+    if (lastPOS === "noun" && pos === "noun") {
+      for (let t = 0; t < 5; t++) {
+        idx = weightedRandomSample(probs);
+        cand = vocab[idx];
+        pos = getPOS(cand);
+        if (pos !== "noun") break;
+      }
+    }
+    words.push(cand);
+    lastPOS = pos;
+  }
+  words = cutOffOnRepeat(words.join(' ')).split(' ');
+  return words.join(' ');
+}
+
+function appendMessage(msg, sender) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + sender;
+  div.textContent = msg;
+  chatbox.appendChild(div);
+  chatbox.scrollTop = chatbox.scrollHeight;
+}
+
+function saveToHistory(sender, msg) {
+  const key = storageSelect.value;
+  history.push({sender, msg});
+  localStorage.setItem(key, JSON.stringify(history));
+}
+
+function clearHistory() {
+  const key = storageSelect.value;
+  history = [];
+  localStorage.removeItem(key);
+  chatbox.innerHTML = '';
+  loadBuiltinVocab();
+}
+
+function cutOffOnRepeat(text) {
+  const words = text.split(/\s+/);
+  const seen = new Set();
+  const result = [];
+  for (const word of words) {
+    if (seen.has(word)) break;
+    seen.add(word);
+    result.push(word);
+  }
+  return result.join(' ');
+}
+
+function handleSend() {
+  const input = document.getElementById('userInput').value.trim();
+  if (!input) return;
+  appendMessage(input, 'user');
+  saveToHistory('user', input);
+  document.getElementById('userInput').value = '';
+  const layers = parseInt(layerSelect.value);
+  setTimeout(() => {
+    const response = transformerGenerate(input, layers);
+    appendMessage(response, 'ai');
+    saveToHistory('ai', response);
+  }, 300);
+}
+
+loadHistoryFromStorage();
+</script>
+
+</body>
+</html>
